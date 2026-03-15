@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>vLLM GPU Advisor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<!-- SIDEBAR NAV -->
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <span class="logo-bracket">[</span>vLLM<span class="logo-bracket">]</span>
+    <span class="logo-sub">ADVISOR</span>
+  </div>
+  <div class="nav-links">
+    <a href="#" class="nav-link active" data-tab="gpu-finder">
+      <span class="nav-icon">🎯</span> GPU Finder
+    </a>
+    <a href="#" class="nav-link" data-tab="config-gen">
+      <span class="nav-icon">⚙️</span> Config Generator
+    </a>
+    <a href="#" class="nav-link" data-tab="calculator">
+      <span class="nav-icon">🧮</span> VRAM Calculator
+    </a>
+    <a href="#" class="nav-link" data-tab="param-ref">
+      <span class="nav-icon">📖</span> Param Reference
+    </a>
+    <a href="#" class="nav-link" data-tab="ai-advisor">
+      <span class="nav-icon">🤖</span> AI Advisor
+    </a>
+  </div>
+  <div class="sidebar-footer">
+    <div class="api-status" id="apiStatus">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Checking...</span>
+    </div>
+  </div>
+</nav>
+
+<!-- MAIN CONTENT -->
+<main class="main">
+
+  <!-- ── GPU FINDER ── -->
+  <section class="tab-content active" id="tab-gpu-finder">
+    <div class="page-header">
+      <h1>GPU <span class="accent">Finder</span></h1>
+      <p>Tell us your model and requirements — we'll find the best GPU for the job.</p>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-title">📋 Your Requirements</div>
+
+        <div class="form-group">
+          <label>Model</label>
+          <select id="gf-model" class="select-input">
+            <option value="">-- Select a model --</option>
+            {% for m in models %}
+            <option value="{{ m }}">{{ m.split('/')[-1] }}</option>
+            {% endfor %}
+            <option value="__custom__">+ Custom model...</option>
+          </select>
+        </div>
+
+        <div id="gf-custom-model-row" class="form-group hidden">
+          <label>HuggingFace Model ID</label>
+          <input type="text" id="gf-custom-model-id" class="text-input" placeholder="org/model-name">
+          <label style="margin-top:8px">Parameter count (B)</label>
+          <input type="number" id="gf-custom-params" class="text-input" placeholder="7" value="7" step="0.1">
+        </div>
+
+        <div class="form-group">
+          <label>Quantization</label>
+          <div class="quant-grid">
+            <button class="quant-btn active" data-quant="fp16">fp16</button>
+            <button class="quant-btn" data-quant="bfloat16">bf16</button>
+            <button class="quant-btn" data-quant="int8">int8</button>
+            <button class="quant-btn" data-quant="fp8">fp8 ★</button>
+            <button class="quant-btn" data-quant="awq">AWQ</button>
+            <button class="quant-btn" data-quant="gptq">GPTQ</button>
+          </div>
+          <div class="quant-hint" id="gf-quant-hint"></div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Context Length</label>
+            <select id="gf-context" class="select-input">
+              <option value="2048">2K</option>
+              <option value="4096" selected>4K</option>
+              <option value="8192">8K</option>
+              <option value="16384">16K</option>
+              <option value="32768">32K</option>
+              <option value="65536">64K</option>
+              <option value="131072">128K</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Number of GPUs</label>
+            <select id="gf-num-gpus" class="select-input">
+              <option value="1">1×</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+              <option value="8">8×</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Target Batch Size</label>
+            <input type="number" id="gf-batch" class="text-input" value="32" min="1" max="1024">
+          </div>
+          <div class="form-group">
+            <label>Min Throughput (tok/s)</label>
+            <input type="number" id="gf-tps" class="text-input" value="0" min="0" placeholder="Any">
+          </div>
+        </div>
+
+        <button class="btn-primary" id="gf-submit">
+          <span>Find Best GPUs</span> <span class="btn-arrow">→</span>
+        </button>
+      </div>
+
+      <div class="panel" id="gf-results-panel">
+        <div class="panel-title">🏆 GPU Recommendations</div>
+        <div id="gf-results">
+          <div class="empty-state">Configure requirements and click "Find Best GPUs"</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CONFIG GENERATOR ── -->
+  <section class="tab-content hidden" id="tab-config-gen">
+    <div class="page-header">
+      <h1>Config <span class="accent">Generator</span></h1>
+      <p>Given your GPU and model, generate the optimal vLLM serve command.</p>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-title">🖥️ Your Setup</div>
+
+        <div class="form-group">
+          <label>GPU</label>
+          <select id="cg-gpu" class="select-input">
+            {% for g in gpus %}
+            <option value="{{ g }}">{{ g }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Model</label>
+          <select id="cg-model" class="select-input">
+            <option value="">-- Select a model --</option>
+            {% for m in models %}
+            <option value="{{ m }}">{{ m.split('/')[-1] }}</option>
+            {% endfor %}
+            <option value="__custom__">+ Custom model...</option>
+          </select>
+        </div>
+
+        <div id="cg-custom-model-row" class="form-group hidden">
+          <label>HuggingFace Model ID</label>
+          <input type="text" id="cg-custom-model-id" class="text-input" placeholder="org/model-name">
+          <label style="margin-top:8px">Parameter count (B)</label>
+          <input type="number" id="cg-custom-params" class="text-input" placeholder="7" value="7" step="0.1">
+        </div>
+
+        <div class="form-group">
+          <label>Quantization</label>
+          <div class="quant-grid">
+            <button class="quant-btn active" data-quant="fp16">fp16</button>
+            <button class="quant-btn" data-quant="bfloat16">bf16</button>
+            <button class="quant-btn" data-quant="int8">int8</button>
+            <button class="quant-btn" data-quant="fp8">fp8 ★</button>
+            <button class="quant-btn" data-quant="awq">AWQ</button>
+            <button class="quant-btn" data-quant="gptq">GPTQ</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Context Length</label>
+          <select id="cg-context" class="select-input">
+            <option value="2048">2K</option>
+            <option value="4096" selected>4K</option>
+            <option value="8192">8K</option>
+            <option value="16384">16K</option>
+            <option value="32768">32K</option>
+            <option value="131072">128K</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>Optimization Priority</label>
+          <div class="priority-grid">
+            <button class="priority-btn" data-priority="throughput">⚡ Throughput</button>
+            <button class="priority-btn" data-priority="latency">⏱ Latency</button>
+            <button class="priority-btn" data-priority="cost">💰 Cost</button>
+            <button class="priority-btn active" data-priority="balanced">⚖ Balanced</button>
+          </div>
+        </div>
+
+        <button class="btn-primary" id="cg-submit">
+          <span>Generate Config</span> <span class="btn-arrow">→</span>
+        </button>
+      </div>
+
+      <div class="panel" id="cg-results-panel">
+        <div class="panel-title">⚙️ Generated Configuration</div>
+        <div id="cg-results">
+          <div class="empty-state">Select GPU and model to generate config</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── VRAM CALCULATOR ── -->
+  <section class="tab-content hidden" id="tab-calculator">
+    <div class="page-header">
+      <h1>VRAM <span class="accent">Calculator</span></h1>
+      <p>Understand exactly how memory is spent and how many sequences you can run.</p>
+    </div>
+
+    <div class="two-col">
+      <div class="panel">
+        <div class="panel-title">📐 Parameters</div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Model Size (B params)</label>
+            <input type="number" id="calc-params" class="text-input" value="7" step="0.1">
+          </div>
+          <div class="form-group">
+            <label>Quantization</label>
+            <select id="calc-quant" class="select-input">
+              <option value="fp16">fp16 (16-bit)</option>
+              <option value="bfloat16">bf16 (16-bit)</option>
+              <option value="int8">int8 (8-bit)</option>
+              <option value="fp8">fp8 (8-bit)</option>
+              <option value="awq">AWQ (4-bit)</option>
+              <option value="gptq">GPTQ (4-bit)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Transformer Layers</label>
+            <input type="number" id="calc-layers" class="text-input" value="32">
+          </div>
+          <div class="form-group">
+            <label>KV Heads (GQA)</label>
+            <input type="number" id="calc-kv-heads" class="text-input" value="8">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Head Dimension</label>
+            <input type="number" id="calc-head-dim" class="text-input" value="128">
+          </div>
+          <div class="form-group">
+            <label>Context Length (tokens)</label>
+            <input type="number" id="calc-context" class="text-input" value="4096">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>GPU VRAM (GB)</label>
+            <input type="number" id="calc-vram" class="text-input" value="80">
+          </div>
+          <div class="form-group">
+            <label>Number of GPUs</label>
+            <input type="number" id="calc-ngpus" class="text-input" value="1" min="1">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>GPU Util (gpu_memory_utilization)</label>
+            <input type="range" id="calc-util" min="0.70" max="0.99" step="0.01" value="0.90">
+            <span id="calc-util-val" style="color:var(--accent);font-size:13px;font-weight:700">0.90</span>
+          </div>
+          <div class="form-group">
+            <label>KV Cache dtype</label>
+            <select id="calc-kv-dtype" class="select-input">
+              <option value="fp16">fp16</option>
+              <option value="fp8">fp8 (H100/Ada)</option>
+            </select>
+          </div>
+        </div>
+
+        <button class="btn-primary" id="calc-submit">
+          <span>Calculate</span> <span class="btn-arrow">→</span>
+        </button>
+
+        <div class="quick-fill-row">
+          <span style="font-size:11px;color:var(--muted)">Quick fill:</span>
+          {% for m in models[:8] %}
+          <button class="pill-btn" data-model="{{ m }}">{{ m.split('/')[-1] }}</button>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">📊 Memory Breakdown</div>
+        <div id="calc-results">
+          <div class="empty-state">Enter parameters and click Calculate</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PARAM REFERENCE ── -->
+  <section class="tab-content hidden" id="tab-param-ref">
+    <div class="page-header">
+      <h1>Parameter <span class="accent">Reference</span></h1>
+      <p>Every vLLM configuration knob, explained with focus-aware guidance.</p>
+    </div>
+    <div id="param-ref-app">
+      <!-- Rendered by JS -->
+    </div>
+  </section>
+
+  <!-- ── AI ADVISOR ── -->
+  <section class="tab-content hidden" id="tab-ai-advisor">
+    <div class="page-header">
+      <h1>AI <span class="accent">Advisor</span></h1>
+      <p>Ask anything about GPU selection, vLLM config, or inference optimization.</p>
+    </div>
+
+    <div class="chat-layout">
+      <div class="chat-sidebar">
+        <div class="panel-title">💡 Quick Prompts</div>
+        <div class="quick-prompts">
+          <button class="qp-btn" data-prompt="I want to serve Llama 3.1 70B with at least 50 tokens/sec throughput on a budget. What GPU and config should I use?">Llama 70B on a budget</button>
+          <button class="qp-btn" data-prompt="What's the best vLLM config for low latency serving of Mistral 7B? I need under 100ms TTFT.">Low latency Mistral 7B</button>
+          <button class="qp-btn" data-prompt="Explain the math behind KV cache memory. How do I calculate how many sequences I can run on an A100 80GB with Llama 3.1 8B at 8K context?">KV cache math explained</button>
+          <button class="qp-btn" data-prompt="Compare AWQ vs FP8 quantization for serving on H100. Which gives better throughput and how much quality do I lose?">AWQ vs FP8 on H100</button>
+          <button class="qp-btn" data-prompt="I have 4× A10G GPUs on RunPod. What's the largest model I can run and what config maximizes throughput?">4× A10G optimization</button>
+          <button class="qp-btn" data-prompt="How does speculative decoding work in vLLM and when should I use it? Give me the best config for a latency-sensitive chat API.">Speculative decoding guide</button>
+          <button class="qp-btn" data-prompt="What's the difference between tensor parallelism and pipeline parallelism in vLLM? When should I use each?">TP vs PP parallelism</button>
+          <button class="qp-btn" data-prompt="How do I calculate the cost per 1M tokens for different GPU configurations on RunPod? Give me a comparison for Llama 3.1 8B.">Cost per 1M tokens calc</button>
+        </div>
+      </div>
+
+      <div class="chat-main">
+        <div class="chat-messages" id="chatMessages">
+          <div class="chat-welcome">
+            <div class="welcome-icon">🤖</div>
+            <h3>vLLM Infrastructure Advisor</h3>
+            <p>I can help you choose the right GPU, generate optimal configs, explain the math, and debug performance issues. Ask me anything.</p>
+            <p class="api-note" id="apiNote"></p>
+          </div>
+        </div>
+        <div class="chat-input-bar">
+          <textarea id="chatInput" placeholder="Ask about GPU selection, vLLM parameters, throughput optimization..." rows="2"></textarea>
+          <button class="btn-send" id="chatSend">
+            <span>↑</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="{{ url_for('static', filename='params.js') }}"></script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
