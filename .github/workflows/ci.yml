@@ -24,12 +24,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run tests with coverage
-        run: |
-          pytest \
-            --cov=. \
-            --cov-report=term-missing \
-            --cov-report=xml \
-            --cov-omit="tests/*,static/*,templates/*"
+        run: pytest --cov=. --cov-report=term-missing --cov-report=xml
         env:
           # No real API keys needed — all external calls are mocked
           ANTHROPIC_API_KEY: ""
