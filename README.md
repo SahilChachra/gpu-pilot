@@ -2,6 +2,17 @@
 
 Your co-pilot for LLM inference — GPU recommendations, vLLM config generation, VRAM calculator, and live cloud pricing in one dashboard.
 
+## Screenshots
+
+| | |
+|---|---|
+| ![GPU Finder](screenshots/1%20-%20GPU%20Finder.png) | ![Config Generator](screenshots/2%20-%20Config%20Generator.png) |
+| **GPU Finder** — ranked GPU recommendations with live cloud pricing | **Config Generator** — optimal `vllm serve` command for your GPU + model |
+| ![VRAM Calculator](screenshots/3%20-%20VRAM%20Calculator.png) | ![Parameter Reference](screenshots/4%20-%20Parameter%20Reference.png) |
+| **VRAM Calculator** — full memory breakdown and max concurrent sequences | **Parameter Reference** — every vLLM knob with focus-aware guidance |
+| ![AI Advisor](screenshots/5%20-%20Chat%20interface.png) | |
+| **AI Advisor** — chat with Claude about GPU selection and config tuning | |
+
 ## Features
 
 | Tab | What it does |
