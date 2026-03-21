@@ -878,3 +878,39 @@ input[type=range] {
   flex-shrink: 0;
 }
 .history-del-btn:hover { color: var(--red); }
+
+/* ── VISION SETTINGS PANEL ───────────────────────────────────────────── */
+.vision-settings {
+  background: rgba(244, 114, 182, 0.04);
+  border: 1px solid rgba(244, 114, 182, 0.2);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.vision-settings-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pink);
+  letter-spacing: 0.06em;
+  margin-bottom: 12px;
+  text-transform: uppercase;
+}
+.vision-encoder-info {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.img-token-preview {
+  font-size: 11px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: rgba(167, 139, 250, 0.06);
+  border-radius: 6px;
+  border: 1px solid rgba(167, 139, 250, 0.12);
+  min-height: 24px;
+}

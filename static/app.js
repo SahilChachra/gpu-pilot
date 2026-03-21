@@ -48,6 +48,9 @@ async function checkApiStatus() {
 
 // ── LIVE PRICES ───────────────────────────────────────────────────────────
 
+let _priceRetries = 0;
+const _PRICE_MAX_RETRIES = 6;
+
 async function fetchLivePrices(manual = false) {
   const priceEl = document.getElementById('priceStatus');
   if (priceEl) priceEl.textContent = manual ? 'Refreshing…' : 'Fetching prices…';
@@ -62,6 +65,7 @@ async function fetchLivePrices(manual = false) {
 
     if (priceEl) {
       if (data.is_live) {
+        _priceRetries = 0;
         const ago = data.last_updated ? Math.round((Date.now() / 1000 - data.last_updated) / 60) : '?';
         const hits = (data.runpod_hits || 0) + (data.vastai_hits || 0);
         priceEl.innerHTML = `<span class="price-live-badge">● LIVE</span> ${hits} GPUs · ${ago}m ago`;
@@ -70,6 +74,13 @@ async function fetchLivePrices(manual = false) {
         }
       } else {
         priceEl.textContent = 'Est. prices (fetching…)';
+        // Background refresh hasn't completed yet — retry after a delay
+        if (_priceRetries < _PRICE_MAX_RETRIES) {
+          _priceRetries++;
+          setTimeout(() => fetchLivePrices(), 3000);
+        } else {
+          priceEl.textContent = 'Est. prices';
+        }
       }
     }
   } catch (e) {
@@ -92,6 +103,99 @@ async function refreshPrices() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh Prices'; }
   }
+}
+
+// ── MODEL DATA CACHE ──────────────────────────────────────────────────────
+
+let ALL_MODELS = null;
+async function getModels() {
+  if (!ALL_MODELS) ALL_MODELS = await (await fetch('/api/models')).json();
+  return ALL_MODELS;
+}
+
+// ── VLM HELPERS ───────────────────────────────────────────────────────────
+
+function calcImageTokensJS(model, imgH, imgW) {
+  if (!model || !model.is_vlm) return 0;
+  if (model.dynamic_res) {
+    const stride = model.patch_size * (model.img_token_merge || 1);
+    return Math.ceil(imgH / stride) * Math.ceil(imgW / stride);
+  } else if (model.tile_based) {
+    const tokPerTile = Math.pow(Math.floor(model.img_size / model.patch_size), 2);
+    const maxTiles   = model.max_tiles || 4;
+    const tilesH     = Math.max(1, Math.ceil(imgH / model.img_size));
+    const tilesW     = Math.max(1, Math.ceil(imgW / model.img_size));
+    return (Math.min(tilesH * tilesW, maxTiles) + 1) * tokPerTile; // +1 thumbnail
+  } else {
+    return model.img_tokens_per_image || 576;
+  }
+}
+
+function parseResPreset(prefix) {
+  const presetEl = document.getElementById(prefix + '-res-preset');
+  if (!presetEl) return { w: 336, h: 336 };
+  if (presetEl.value === 'custom') {
+    return {
+      w: parseInt(document.getElementById(prefix + '-img-w')?.value || 1024),
+      h: parseInt(document.getElementById(prefix + '-img-h')?.value || 1024),
+    };
+  }
+  const [w, h] = presetEl.value.split('x').map(Number);
+  return { w, h };
+}
+
+function updateImgTokenPreview(prefix, model) {
+  const previewEl = document.getElementById(prefix + '-img-token-preview');
+  if (!previewEl || !model?.is_vlm) return;
+  const { w, h } = parseResPreset(prefix);
+  const numImages = parseInt(document.getElementById(prefix + '-num-images')?.value || 1);
+  const tok = calcImageTokensJS(model, h, w);
+  const total = tok * numImages;
+  const cross = model.cross_attention_vision;
+  previewEl.innerHTML =
+    `<span style="color:var(--purple);font-weight:700">${tok.toLocaleString()} tokens/image</span>` +
+    (numImages > 1 ? ` · <span style="color:var(--accent)">${total.toLocaleString()} total</span>` : '') +
+    (cross ? ` · <span style="color:var(--green)">cross-attention (not in main KV cache)</span>` : ` · <span style="color:var(--muted)">added to context</span>`);
+}
+
+function attachVisionPanel(prefix, modelSelectId) {
+  const presetEl      = document.getElementById(prefix + '-res-preset');
+  const customResRow  = document.getElementById(prefix + '-custom-res-row');
+  const visionPanel   = document.getElementById(prefix + '-vision-row');
+  const encoderInfo   = document.getElementById(prefix + '-vision-encoder-info');
+  let _currentVlmModel = null;
+
+  const refresh = () => updateImgTokenPreview(prefix, _currentVlmModel);
+
+  if (presetEl) {
+    presetEl.addEventListener('change', () => {
+      customResRow?.classList.toggle('hidden', presetEl.value !== 'custom');
+      refresh();
+    });
+  }
+  document.getElementById(prefix + '-num-images')?.addEventListener('input', refresh);
+  document.getElementById(prefix + '-img-w')?.addEventListener('input', refresh);
+  document.getElementById(prefix + '-img-h')?.addEventListener('input', refresh);
+
+  // Return a function that tabs call when model changes (modelId or synthetic model object)
+  return async function onModelChange(modelIdOrObj) {
+    let model;
+    if (modelIdOrObj && typeof modelIdOrObj === 'object') {
+      // Synthetic model from HF fetch
+      model = modelIdOrObj.is_vlm ? modelIdOrObj : null;
+    } else {
+      const models = await getModels();
+      model = models[modelIdOrObj];
+      model = model?.is_vlm ? model : null;
+    }
+    _currentVlmModel = model;
+    if (visionPanel) visionPanel.classList.toggle('hidden', !_currentVlmModel);
+    if (encoderInfo && _currentVlmModel) {
+      encoderInfo.textContent = `${_currentVlmModel.vision_encoder} · ${_currentVlmModel.vision_encoder_gb} GB`;
+    }
+    refresh();
+    return _currentVlmModel;
+  };
 }
 
 // ── SHARED QUANT STATE ────────────────────────────────────────────────────
@@ -124,18 +228,39 @@ function makePriorityPicker(containerEl) {
 // ── GPU FINDER ────────────────────────────────────────────────────────────
 
 function initGpuFinder() {
-  const modelSel = document.getElementById('gf-model');
+  const modelSel  = document.getElementById('gf-model');
   const customRow = document.getElementById('gf-custom-model-row');
   const quantPicker = makeQuantPicker(document.querySelector('#tab-gpu-finder'), q => {
     updateQuantHint(q, 'gf-quant-hint');
   });
+  const onVisionModelChange = attachVisionPanel('gf', 'gf-model');
 
   modelSel.addEventListener('change', () => {
     customRow.classList.toggle('hidden', modelSel.value !== '__custom__');
+    if (modelSel.value !== '__custom__') {
+      delete _customVlmInfo['gf'];
+      onVisionModelChange(modelSel.value);
+    } else {
+      document.getElementById('gf-vision-row')?.classList.add('hidden');
+    }
   });
 
   // HuggingFace auto-fetch when user types a model ID
-  attachHfAutoFetch('gf-custom-model-id', 'gf-custom-params', 'gf-hf-info');
+  attachHfAutoFetch('gf-custom-model-id', 'gf-custom-params', 'gf-hf-info', {
+    onVlmDetected: (vlmInfo) => {
+      if (vlmInfo) {
+        _customVlmInfo['gf'] = vlmInfo;
+        onVisionModelChange(vlmInfo);
+      } else {
+        delete _customVlmInfo['gf'];
+        document.getElementById('gf-vision-row')?.classList.add('hidden');
+      }
+    },
+    onMoeDetected: (moeInfo) => {
+      if (moeInfo) _customMoeInfo['gf'] = moeInfo;
+      else delete _customMoeInfo['gf'];
+    },
+  });
 
   document.getElementById('gf-submit').addEventListener('click', async () => {
     const modelId = modelSel.value === '__custom__'
@@ -143,14 +268,34 @@ function initGpuFinder() {
       : modelSel.value;
     if (!modelId) return showError('gf-results', 'Please select or enter a model.');
 
+    const { w, h } = parseResPreset('gf');
+    const vlm = _customVlmInfo['gf'];
+    const moe = _customMoeInfo['gf'];
     const payload = {
-      model_id: modelId,
-      quant: quantPicker.get(),
-      context_len: document.getElementById('gf-context').value,
-      target_batch: document.getElementById('gf-batch').value,
-      target_tps: document.getElementById('gf-tps').value,
-      num_gpus: document.getElementById('gf-num-gpus').value,
+      model_id:       modelId,
+      quant:          quantPicker.get(),
+      context_len:    document.getElementById('gf-context').value,
+      target_batch:   document.getElementById('gf-batch').value,
+      target_tps:     document.getElementById('gf-tps').value,
+      num_gpus:       document.getElementById('gf-num-gpus').value,
       custom_params_b: document.getElementById('gf-custom-params')?.value || 7,
+      num_images:     document.getElementById('gf-num-images')?.value || 1,
+      img_w:          w,
+      img_h:          h,
+      ...(moe ? { custom_total_params_b: moe.total_params_b } : {}),
+      ...(vlm ? {
+        custom_is_vlm:              true,
+        custom_vision_encoder:      vlm.vision_encoder,
+        custom_vision_encoder_gb:   vlm.vision_encoder_gb,
+        custom_patch_size:          vlm.patch_size,
+        custom_img_size:            vlm.img_size,
+        custom_dynamic_res:         vlm.dynamic_res,
+        custom_tile_based:          vlm.tile_based,
+        custom_img_token_merge:     vlm.img_token_merge,
+        custom_img_tokens_per_image: vlm.img_tokens_per_image,
+        custom_max_tiles:           vlm.max_tiles,
+        custom_cross_attention_vision: vlm.cross_attention_vision,
+      } : {}),
     };
 
     showLoading('gf-results');
@@ -178,9 +323,15 @@ function updateQuantHint(quant, hintId) {
   if (el) el.textContent = hints[quant] || '';
 }
 
+// ── CUSTOM VLM STATE ─────────────────────────────────────────────────────
+// Stores HF-fetched VLM info per prefix so form submissions can include it.
+const _customVlmInfo = {};  // { 'gf': {...vlm fields}, 'cg': {...} }
+// Stores total params for MoE models (active params are shown in UI, total needed for VRAM).
+const _customMoeInfo = {};  // { 'gf': { total_params_b: 393.61 }, 'cg': {...} }
+
 // ── HF MODEL AUTO-FETCH ───────────────────────────────────────────────────
 
-function attachHfAutoFetch(inputId, paramsId, infoId) {
+function attachHfAutoFetch(inputId, paramsId, infoId, { onVlmDetected, onMoeDetected } = {}) {
   const input = document.getElementById(inputId);
   const paramsEl = document.getElementById(paramsId);
   const infoEl = document.getElementById(infoId);
@@ -202,10 +353,22 @@ function attachHfAutoFetch(inputId, paramsId, infoId) {
           infoEl.innerHTML = `<span class="hf-error">⚠ ${escHtml(d.error)}</span>`;
           return;
         }
-        if (paramsEl) paramsEl.value = d.params_b;
-        const moeTag = d.is_moe ? ` · <span style="color:var(--orange)">⚡ MoE ${d.num_experts} experts</span>` : '';
+        // For MoE: fill with active params (what matters for compute), show total separately
+        if (paramsEl) paramsEl.value = d.is_moe ? d.active_params_b : d.params_b;
+
+        const paramStr = d.is_moe
+          ? `${d.active_params_b}B active / ${d.params_b}B total`
+          : `${d.params_b}B params`;
+        const moeTag = d.is_moe
+          ? ` · <span style="color:var(--orange)">⚡ MoE ${d.num_experts} experts · ${d.num_experts_per_tok} active/tok</span>`
+          : '';
+        const vlmTag = d.is_vlm ? ` · <span style="color:var(--pink)">📷 VLM · ${escHtml(d.vision_encoder)} · ${d.vision_encoder_gb}GB encoder</span>` : '';
         infoEl.innerHTML = `<span class="hf-ok">✓ Auto-filled</span>`
-          + ` <span class="hf-detail">${escHtml(d.model_type)} · ${d.params_b}B params · ${d.layers} layers · ${d.kv_heads} KV heads${moeTag}</span>`;
+          + ` <span class="hf-detail">${escHtml(d.model_type)} · ${paramStr} · ${d.layers} layers · ${d.kv_heads} KV heads${moeTag}${vlmTag}</span>`;
+
+        // Notify caller about VLM and MoE status
+        if (onVlmDetected) onVlmDetected(d.is_vlm ? d : null);
+        if (onMoeDetected) onMoeDetected(d.is_moe ? { total_params_b: d.params_b } : null);
       } catch {
         infoEl.innerHTML = '<span class="hf-error">Fetch error — check model ID</span>';
       }
@@ -333,11 +496,15 @@ function renderGpuResults(data, containerId, quant) {
   // Model summary banner
   if (modelVram) {
     const isMoe = data.is_moe;
+    const isVlm = data.is_vlm;
     html += `<div style="font-size:11px;color:var(--muted);margin-bottom:14px;padding:10px 14px;background:var(--bg3);border-radius:8px;border:1px solid var(--border2);line-height:1.7;">
       <span style="color:var(--text);font-weight:700">Model weights (${quant}):</span>
       <span style="color:var(--accent);font-weight:800"> ${modelVram} GB</span>
       &nbsp;·&nbsp; KV cache/seq: <span style="color:var(--purple);font-weight:700">${data.kv_per_seq_gb} GB</span>
       ${isMoe ? '&nbsp;·&nbsp;<span style="color:var(--orange);font-weight:700">⚡ MoE — full weights in VRAM, active-param throughput</span>' : ''}
+      ${isVlm ? `&nbsp;·&nbsp;<span style="color:var(--pink);font-weight:700">👁 VLM</span>
+        <span style="color:var(--muted)"> encoder: ${data.encoder_vram_gb} GB · ${data.img_tokens_per_image?.toLocaleString()} tok/img · ${data.vision_encoder}</span>
+        ${data.cross_attention_vision ? '<span style="color:var(--green)"> · cross-attn (img tokens bypass KV)</span>' : ''}` : ''}
       ${data.model_notes ? `<div style="margin-top:5px;color:var(--muted)">${escHtml(data.model_notes)}</div>` : ''}
     </div>`;
   }
@@ -411,16 +578,37 @@ function renderGpuResults(data, containerId, quant) {
 // ── CONFIG GENERATOR ──────────────────────────────────────────────────────
 
 function initConfigGen() {
-  const modelSel = document.getElementById('cg-model');
+  const modelSel  = document.getElementById('cg-model');
   const customRow = document.getElementById('cg-custom-model-row');
-  const quantPicker = makeQuantPicker(document.querySelector('#tab-config-gen'));
+  const quantPicker    = makeQuantPicker(document.querySelector('#tab-config-gen'));
   const priorityPicker = makePriorityPicker(document.querySelector('#tab-config-gen'));
+  const onVisionModelChange = attachVisionPanel('cg', 'cg-model');
 
   modelSel.addEventListener('change', () => {
     customRow.classList.toggle('hidden', modelSel.value !== '__custom__');
+    if (modelSel.value !== '__custom__') {
+      delete _customVlmInfo['cg'];
+      onVisionModelChange(modelSel.value);
+    } else {
+      document.getElementById('cg-vision-row')?.classList.add('hidden');
+    }
   });
 
-  attachHfAutoFetch('cg-custom-model-id', 'cg-custom-params', 'cg-hf-info');
+  attachHfAutoFetch('cg-custom-model-id', 'cg-custom-params', 'cg-hf-info', {
+    onVlmDetected: (vlmInfo) => {
+      if (vlmInfo) {
+        _customVlmInfo['cg'] = vlmInfo;
+        onVisionModelChange(vlmInfo);
+      } else {
+        delete _customVlmInfo['cg'];
+        document.getElementById('cg-vision-row')?.classList.add('hidden');
+      }
+    },
+    onMoeDetected: (moeInfo) => {
+      if (moeInfo) _customMoeInfo['cg'] = moeInfo;
+      else delete _customMoeInfo['cg'];
+    },
+  });
 
   document.getElementById('cg-submit').addEventListener('click', async () => {
     const modelId = modelSel.value === '__custom__'
@@ -428,13 +616,33 @@ function initConfigGen() {
       : modelSel.value;
     if (!modelId) return showError('cg-results', 'Please select a model.');
 
+    const { w, h } = parseResPreset('cg');
+    const vlm = _customVlmInfo['cg'];
+    const moe = _customMoeInfo['cg'];
     const payload = {
-      gpu: document.getElementById('cg-gpu').value,
-      model_id: modelId,
-      quant: quantPicker.get(),
-      context_len: document.getElementById('cg-context').value,
-      priority: priorityPicker.get(),
+      gpu:            document.getElementById('cg-gpu').value,
+      model_id:       modelId,
+      quant:          quantPicker.get(),
+      context_len:    document.getElementById('cg-context').value,
+      priority:       priorityPicker.get(),
       custom_params_b: document.getElementById('cg-custom-params')?.value || 7,
+      num_images:     document.getElementById('cg-num-images')?.value || 1,
+      img_w:          w,
+      img_h:          h,
+      ...(moe ? { custom_total_params_b: moe.total_params_b } : {}),
+      ...(vlm ? {
+        custom_is_vlm:              true,
+        custom_vision_encoder:      vlm.vision_encoder,
+        custom_vision_encoder_gb:   vlm.vision_encoder_gb,
+        custom_patch_size:          vlm.patch_size,
+        custom_img_size:            vlm.img_size,
+        custom_dynamic_res:         vlm.dynamic_res,
+        custom_tile_based:          vlm.tile_based,
+        custom_img_token_merge:     vlm.img_token_merge,
+        custom_img_tokens_per_image: vlm.img_tokens_per_image,
+        custom_max_tiles:           vlm.max_tiles,
+        custom_cross_attention_vision: vlm.cross_attention_vision,
+      } : {}),
     };
 
     showLoading('cg-results');
@@ -509,6 +717,14 @@ function renderConfig(data, containerId, payload) {
     </div>`;
   }
 
+  if (data.is_vlm) {
+    const cross = data.cross_attention_vision;
+    html += `<div style="padding:10px 14px;background:rgba(244,114,182,0.06);border:1px solid rgba(244,114,182,0.2);border-radius:8px;margin-bottom:14px;font-size:11px;color:var(--pink)">
+      👁️ <strong>VLM Config</strong> · ${data.img_tokens_per_image?.toLocaleString() || '?'} tokens/image · encoder: ${data.encoder_vram_gb} GB
+      ${cross ? ' · <span style="color:var(--green)">cross-attention (images bypass main KV cache)</span>' : ''}
+    </div>`;
+  }
+
   if (data.model_notes) {
     html += `<div style="padding:8px 14px;background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.15);border-radius:8px;margin-bottom:14px;font-size:11px;color:var(--muted)">
       📋 ${escHtml(data.model_notes)}
@@ -538,6 +754,7 @@ function renderConfig(data, containerId, payload) {
     { k:'enable-prefix-caching',  v: data.enable_prefix_caching ? 'true' : 'false' },
     { k:'kv-cache-dtype',         v: data.kv_cache_dtype },
     { k:'scheduler-delay-factor', v: data.scheduler_delay_factor },
+    ...(data.is_vlm ? [{ k:'limit-mm-per-prompt', v: `image=${payload.num_images || 1}` }] : []),
   ];
 
   html += `<div style="margin-top:14px">
@@ -564,22 +781,55 @@ window.copyCmd = function() {
 // ── CALCULATOR ────────────────────────────────────────────────────────────
 
 function initCalculator() {
-  const utilSlider = document.getElementById('calc-util');
-  const utilVal = document.getElementById('calc-util-val');
+  const utilSlider  = document.getElementById('calc-util');
+  const utilVal     = document.getElementById('calc-util-val');
+  const vlmCheckbox = document.getElementById('calc-is-vlm');
+  const vlmRow      = document.getElementById('calc-vision-row');
   utilSlider.addEventListener('input', () => { utilVal.textContent = parseFloat(utilSlider.value).toFixed(2); });
 
+  vlmCheckbox?.addEventListener('change', () => {
+    vlmRow?.classList.toggle('hidden', !vlmCheckbox.checked);
+  });
+
+  // Live token preview in VRAM calc VLM section
+  const calcImgPreview = () => {
+    if (!vlmCheckbox?.checked) return;
+    const w = parseInt(document.getElementById('calc-img-w')?.value || 1024);
+    const h = parseInt(document.getElementById('calc-img-h')?.value || 1024);
+    const numImages = parseInt(document.getElementById('calc-num-images')?.value || 1);
+    // Use a generic dynamic model as approximation (patch_size 14, merge 1)
+    const tok = Math.ceil(h / 14) * Math.ceil(w / 14);
+    const previewEl = document.getElementById('calc-img-token-preview');
+    if (previewEl) {
+      previewEl.innerHTML = `<span style="color:var(--purple)">${tok.toLocaleString()} tokens/image</span>` +
+        (numImages > 1 ? ` · <span style="color:var(--accent)">${(tok*numImages).toLocaleString()} total</span>` : '') +
+        ' <span style="color:var(--muted)">(approximate — actual depends on model)</span>';
+    }
+  };
+  ['calc-img-w','calc-img-h','calc-num-images'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', calcImgPreview);
+  });
+
   document.getElementById('calc-submit').addEventListener('click', async () => {
+    const isVlm = vlmCheckbox?.checked;
+    const imgW = parseInt(document.getElementById('calc-img-w')?.value || 1024);
+    const imgH = parseInt(document.getElementById('calc-img-h')?.value || 1024);
+    const imgTok = isVlm ? Math.ceil(imgH / 14) * Math.ceil(imgW / 14) : 0;
+
     const payload = {
-      params_b:    document.getElementById('calc-params').value,
-      quant:       document.getElementById('calc-quant').value,
-      context_len: document.getElementById('calc-context').value,
-      num_layers:  document.getElementById('calc-layers').value,
-      kv_heads:    document.getElementById('calc-kv-heads').value,
-      head_dim:    document.getElementById('calc-head-dim').value,
-      gpu_vram:    document.getElementById('calc-vram').value,
-      num_gpus:    document.getElementById('calc-ngpus').value,
-      gpu_util:    document.getElementById('calc-util').value,
-      kv_dtype:    document.getElementById('calc-kv-dtype').value,
+      params_b:           document.getElementById('calc-params').value,
+      quant:              document.getElementById('calc-quant').value,
+      context_len:        document.getElementById('calc-context').value,
+      num_layers:         document.getElementById('calc-layers').value,
+      kv_heads:           document.getElementById('calc-kv-heads').value,
+      head_dim:           document.getElementById('calc-head-dim').value,
+      gpu_vram:           document.getElementById('calc-vram').value,
+      num_gpus:           document.getElementById('calc-ngpus').value,
+      gpu_util:           document.getElementById('calc-util').value,
+      kv_dtype:           document.getElementById('calc-kv-dtype').value,
+      vision_encoder_gb:  isVlm ? (document.getElementById('calc-vision-encoder-gb')?.value || 0) : 0,
+      num_images:         isVlm ? (document.getElementById('calc-num-images')?.value || 1) : 1,
+      img_tokens:         isVlm ? imgTok : 0,
     };
     showLoading('calc-results');
     const data = await postApi('/api/calculate', payload);
@@ -589,13 +839,21 @@ function initCalculator() {
   // Quick-fill model buttons
   document.querySelectorAll('.pill-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      const models = await (await fetch('/api/models')).json();
+      const models = await getModels();
       const m = models[btn.dataset.model];
       if (!m) return;
       document.getElementById('calc-params').value = m.params_b;
       document.getElementById('calc-layers').value = m.layers;
       document.getElementById('calc-kv-heads').value = m.kv_heads;
       document.getElementById('calc-head-dim').value = m.head_dim;
+      // If VLM model, enable VLM section and prefill encoder GB
+      if (m.is_vlm && vlmCheckbox) {
+        vlmCheckbox.checked = true;
+        vlmRow?.classList.remove('hidden');
+        const encEl = document.getElementById('calc-vision-encoder-gb');
+        if (encEl) encEl.value = m.vision_encoder_gb || 0.6;
+        calcImgPreview();
+      }
     });
   });
 }
@@ -603,19 +861,30 @@ function initCalculator() {
 function renderCalcResults(data, payload) {
   if (!data || data.error) { showError('calc-results', data?.error || 'Failed'); return; }
 
-  const totalVram = parseFloat(payload.gpu_vram) * parseInt(payload.num_gpus);
-  const modelPct = Math.min(100, (data.model_vram_gb / totalVram) * 100);
-  const kvPct    = Math.min(100, ((totalVram * parseFloat(payload.gpu_util) - data.model_vram_gb) / totalVram) * 100);
-  const fitColor = data.fits_on_gpu ? 'val-green' : 'val-red';
+  const totalVram  = parseFloat(payload.gpu_vram) * parseInt(payload.num_gpus);
+  const lmPct      = Math.min(100, (data.lm_vram_gb / totalVram) * 100);
+  const encPct     = data.vision_encoder_gb > 0 ? Math.min(100, (data.vision_encoder_gb / totalVram) * 100) : 0;
+  const kvPct      = Math.min(100, ((totalVram * parseFloat(payload.gpu_util) - data.model_vram_gb) / totalVram) * 100);
+  const fitColor   = data.fits_on_gpu ? 'val-green' : 'val-red';
+  const isVlm      = (data.vision_encoder_gb || 0) > 0;
 
-  const html = `
+  let html = `
     <div class="calc-results-grid">
+      ${isVlm ? `
       <div class="calc-row">
-        <span class="calc-row-label">Model weights VRAM</span>
+        <span class="calc-row-label">LLM weights VRAM</span>
+        <span class="calc-row-val val-purple">${data.lm_vram_gb} GB</span>
+      </div>
+      <div class="calc-row">
+        <span class="calc-row-label">Vision encoder VRAM</span>
+        <span class="calc-row-val" style="color:var(--pink)">${data.vision_encoder_gb} GB</span>
+      </div>` : ''}
+      <div class="calc-row">
+        <span class="calc-row-label">${isVlm ? 'Total model VRAM (LLM + encoder)' : 'Model weights VRAM'}</span>
         <span class="calc-row-val val-purple">${data.model_vram_gb} GB</span>
       </div>
       <div class="calc-row">
-        <span class="calc-row-label">KV cache per sequence</span>
+        <span class="calc-row-label">KV cache per sequence${isVlm && data.total_img_tokens > 0 ? ` (incl. ${data.total_img_tokens.toLocaleString()} img tokens)` : ''}</span>
         <span class="calc-row-val val-blue">${data.kv_per_seq_gb} GB</span>
       </div>
       <div class="calc-row">
@@ -640,12 +909,14 @@ function renderCalcResults(data, payload) {
       <div class="config-label" style="margin-bottom:8px">VRAM BREAKDOWN</div>
       <div class="mem-bar-wrap">
         <div style="display:flex;height:20px;border-radius:6px;overflow:hidden;gap:2px;margin-bottom:6px">
-          <div style="width:${modelPct.toFixed(1)}%;background:var(--purple);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#000;min-width:30px">${modelPct.toFixed(0)}%</div>
-          <div style="width:${(kvPct).toFixed(1)}%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#000;min-width:30px">${kvPct.toFixed(0)}%</div>
+          <div style="width:${lmPct.toFixed(1)}%;background:var(--purple);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#000;min-width:${lmPct > 5 ? 30 : 0}px">${lmPct.toFixed(0)}%</div>
+          ${encPct > 0 ? `<div style="width:${encPct.toFixed(1)}%;background:var(--pink);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#000;min-width:${encPct > 2 ? 20 : 0}px"></div>` : ''}
+          <div style="width:${kvPct.toFixed(1)}%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#000;min-width:${kvPct > 5 ? 30 : 0}px">${kvPct.toFixed(0)}%</div>
           <div style="flex:1;background:var(--bg3)"></div>
         </div>
         <div class="mem-bar-labels">
-          <span style="color:var(--purple)">■ Model weights (${data.model_vram_gb}GB)</span>
+          <span style="color:var(--purple)">■ Model weights (${data.lm_vram_gb}GB)</span>
+          ${encPct > 0 ? `<span style="color:var(--pink)">■ Vision encoder (${data.vision_encoder_gb}GB)</span>` : ''}
           <span style="color:var(--accent)">■ KV cache budget (${data.available_for_kv_gb}GB)</span>
           <span>■ Reserved/Other</span>
         </div>
@@ -655,7 +926,8 @@ function renderCalcResults(data, payload) {
     <div class="explanation-box" style="margin-top:14px">
       <strong>KV cache formula:</strong><br>
       2 × layers × kv_heads × head_dim × context_len × bytes/elem<br>
-      = 2 × ${payload.num_layers} × ${payload.kv_heads} × ${payload.head_dim} × ${payload.context_len} × ${payload.kv_dtype === 'fp8' ? 1 : 2}<br>
+      = 2 × ${payload.num_layers} × ${payload.kv_heads} × ${payload.head_dim} × ${data.eff_context} × ${payload.kv_dtype === 'fp8' ? 1 : 2}<br>
+      ${isVlm && data.total_img_tokens > 0 ? `<span style="color:var(--pink)">context = ${payload.context_len} text + ${data.total_img_tokens} image tokens = ${data.eff_context}</span><br>` : ''}
       = <strong style="color:var(--accent)">${data.kv_per_seq_gb} GB per sequence</strong><br><br>
       <strong>Max sequences:</strong> ${data.available_for_kv_gb}GB ÷ ${data.kv_per_seq_gb}GB = <strong style="color:var(--green)">${data.max_concurrent_seqs}</strong>
     </div>`;

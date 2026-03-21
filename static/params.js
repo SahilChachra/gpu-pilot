@@ -175,6 +175,53 @@ window.VLLM_PARAMS = [
     example: "vllm serve <model> --speculative-model <draft> --num-speculative-tokens 5",
     recipe: { latency:"5 for same-family, 3 for cross-family" }
   },
+
+  // ── Multimodal / VLM ──────────────────────────────────────────────────────
+  {
+    name: "--limit-mm-per-prompt", alias: "", category: "Multimodal", type: "string", default: "None (1 image)",
+    options: "image=N | video=N | audio=N",
+    focus: ["throughput","memory","latency","cost"], impact: "critical",
+    summary: "Maximum number of media items (images / video frames / audio) allowed per prompt for VLMs.",
+    detail: "vLLM defaults to 1 image per request. For multi-image batch inference you must explicitly set this flag. Each image adds hundreds to thousands of KV tokens depending on model and resolution — plan VRAM accordingly. Setting too high without enough KV budget causes OOM at runtime.",
+    tradeoffs: [
+      {l:"image=1",v:"Safe default; minimal KV overhead per seq"},
+      {l:"image=4",v:"~4× more KV tokens; size context and batch accordingly"},
+      {l:"image=16+",v:"High-throughput document pipelines; KV budget must cover all image tokens"},
+      {l:"LLaVA-1.5",v:"576 tok/image × N images added to context"},
+      {l:"Qwen2-VL 1080p",v:"~2470 tok/image × N images; 1080p×8 = 19 760 extra tokens"}
+    ],
+    when: {
+      throughput: "Set to actual images-per-request. Under-setting silently truncates — images beyond the limit are dropped.",
+      memory: "Each image adds img_tokens to context. Total KV = (text_ctx + img_tok×N) × kv_per_token. Size gpu_memory_utilization accordingly.",
+      latency: "Keep low (image=1 or 2) for TTFT-sensitive APIs — fewer image tokens = faster prefill.",
+      cost: "Higher image count → more compute per request. Balance throughput vs image resolution to optimize cost.",
+      comparison: "Fix to same value across model comparisons; image token count changes KV cache and throughput significantly."
+    },
+    example: "vllm serve Qwen/Qwen2-VL-7B-Instruct --limit-mm-per-prompt image=4",
+    recipe: { throughput:"Match your batch image count", memory:"1–2 for memory-constrained setups", latency:"image=1 for single-image low-latency" }
+  },
+  {
+    name: "--mm-processor-kwargs", alias: "", category: "Multimodal", type: "JSON dict", default: "None",
+    options: "min_pixels, max_pixels, max_num_tiles, …",
+    focus: ["memory","throughput"], impact: "medium",
+    summary: "Pass keyword arguments to the multimodal processor — controls resolution and token count for dynamic-resolution VLMs.",
+    detail: "For Qwen2-VL you can set min_pixels and max_pixels to cap image token count. For tile-based models (LLaVA-NeXT, InternVL) you can control max_num_tiles. Lower max_pixels → fewer tokens → faster throughput and lower VRAM, at the cost of fine-grained visual detail.",
+    tradeoffs: [
+      {l:"Qwen2-VL default",v:"up to 1280×28×28=1003520 max_pixels ≈ 1280 tokens/image"},
+      {l:"max_pixels=256*28*28",v:"≤256 tokens/image — fast but coarse resolution"},
+      {l:"max_num_tiles=4",v:"LLaVA-NeXT: cap at 4 tiles = 2304 tokens/image"},
+      {l:"Quality tradeoff",v:"Lower resolution = fewer tokens but misses fine text/details"}
+    ],
+    when: {
+      memory: "Set max_pixels or max_num_tiles to cap image token count when VRAM is tight. Critical for high-res batches.",
+      throughput: "Lower image tokens → shorter prefill → higher throughput. Trade resolution for speed.",
+      latency: "Reduce max_pixels for faster TTFT on image-heavy prompts.",
+      cost: "Fewer tokens per image = more requests per GPU-hour.",
+      comparison: "Fix max_pixels/max_num_tiles across model comparisons to control for token count."
+    },
+    example: 'vllm serve Qwen/Qwen2-VL-7B-Instruct --mm-processor-kwargs \'{"max_pixels": 360448}\'',
+    recipe: { memory:"max_pixels=200704 (≈256 tok/img)", throughput:"max_pixels=401408 (≈512 tok/img)" }
+  },
 ];
 
 window.FOCUS_META = {
@@ -192,4 +239,4 @@ window.IMPACT_META = {
   low:      { color:"#6b7280", bg:"rgba(107,114,128,0.1)", label:"LOW" },
 };
 
-window.CATEGORIES = ["All","Parallelism","Quantization","KV Cache","Batching","Memory","Attention","Speculative"];
+window.CATEGORIES = ["All","Parallelism","Quantization","KV Cache","Batching","Memory","Attention","Speculative","Multimodal"];

@@ -63,9 +63,14 @@ def fetch_runpod_prices():
 def fetch_vastai_prices():
     """Query Vast.ai's public bundle API for minimum single-GPU spot prices. Returns (prices_dict, error_str|None)."""
     try:
+        import json as _json
         resp = http.get(
             "https://console.vast.ai/api/v0/bundles/",
-            params={"q": '{"rentable":true,"num_gpus":{"gte":1,"lte":1},"order":[["dph_total","asc"]]}'},
+            params={"q": _json.dumps({
+                "rentable": {"eq": True},
+                "num_gpus": {"eq": 1},
+                "order":    [["dph_total", "asc"]],
+            })},
             timeout=10,
         )
         if resp.status_code != 200:

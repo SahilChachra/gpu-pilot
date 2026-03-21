@@ -74,6 +74,15 @@ class TestGpuDatabase:
         assert "RTX 5090" in GPUS
         assert "B200 SXM 192GB" in GPUS
 
+    def test_b300_datacenter_present(self):
+        assert "B300 SXM 288GB" in GPUS
+
+    def test_rtx_5060_ti_present(self):
+        assert "RTX 5060 Ti" in GPUS
+
+    def test_rtx_pro_6000_blackwell_present(self):
+        assert "RTX Pro 6000 Blackwell" in GPUS
+
     def test_no_duplicate_keys(self):
         # Python dicts can't have dupes, but check keys are unique strings
         assert len(GPUS) == len(set(GPUS.keys()))
@@ -103,7 +112,7 @@ MODEL_REQUIRED_KEYS = {
     "context", "use_cases", "license", "notes",
 }
 VALID_ARCHES   = {"decoder", "moe"}
-VALID_LICENSES = {"llama3", "apache2", "mistral", "gemma", "commercial", "mit", "unknown"}
+VALID_LICENSES = {"llama3", "llama2", "apache2", "mistral", "gemma", "commercial", "mit", "unknown"}
 
 
 class TestModelDatabase:

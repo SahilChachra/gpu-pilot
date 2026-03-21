@@ -18,6 +18,13 @@ GPUS = {
         "tier": "flagship",
         "notes": "Latest NVIDIA flagship. 192 GB HBM3e, 8 TB/s BW. NVLink 5.0 (1.8 TB/s). FP4 Transformer Engine. Enterprise-only, limited cloud availability.",
     },
+    "B300 SXM 288GB": {
+        "vram": 288, "bw": 16000, "tflops_bf16": 4500, "tflops_fp8": 9000,
+        "nvlink": True,  "fp8": True,  "arch": "Blackwell",            "mig": 7,
+        "runpod_hr": None, "lambda_hr": None,  "vastai_hr": None,
+        "tier": "flagship",
+        "notes": "Next-gen Blackwell flagship announced GTC 2025. 288 GB HBM3e, 16 TB/s BW. FP4/FP8 Transformer Engine. Double the KV cache capacity of B200. Not yet widely available.",
+    },
     "B100 SXM 192GB": {
         "vram": 192, "bw": 8000, "tflops_bf16": 1750, "tflops_fp8": 3500,
         "nvlink": True,  "fp8": True,  "arch": "Blackwell",            "mig": 7,
@@ -187,6 +194,20 @@ GPUS = {
         "tier": "budget",
         "notes": "12 GB GDDR7. Sufficient only for ≤7B AWQ/INT4. Very limited for 7B fp16 (14 GB needed).",
     },
+    "RTX Pro 6000 Blackwell": {
+        "vram": 96,  "bw": 1792, "tflops_bf16": 890,  "tflops_fp8": 1780,
+        "nvlink": False, "fp8": True,  "arch": "Blackwell (pro)",      "mig": 4,
+        "runpod_hr": 1.89, "lambda_hr": None,   "vastai_hr": 1.20,
+        "tier": "high",
+        "notes": "Professional Blackwell workstation GPU. 96 GB GDDR7 ECC, 1.8 TB/s BW. 2nd-gen Transformer Engine (FP8/FP4). 4 MIG instances. No NVLink — PCIe only. Excellent VRAM-per-$ vs datacenter cards.",
+    },
+    "RTX 5060 Ti": {
+        "vram": 16,  "bw": 448,  "tflops_bf16": 184,  "tflops_fp8": 368,
+        "nvlink": False, "fp8": True,  "arch": "Blackwell (consumer)", "mig": 0,
+        "runpod_hr": None, "lambda_hr": None,   "vastai_hr": 0.20,
+        "tier": "budget",
+        "notes": "16 GB GDDR7. Entry-level Blackwell. FP8 support. Suits 7B AWQ/INT4 or small 7B fp16. Not yet common in cloud deployments.",
+    },
 
     # ── Previous-Gen / Legacy ────────────────────────────────────────────────
     "RTX 3090": {
@@ -217,6 +238,8 @@ GPUS = {
 
 RUNPOD_NAME_MAP = {
     # Blackwell
+    "NVIDIA B300 SXM":             "B300 SXM 288GB",
+    "NVIDIA B300 SXM 288GB":       "B300 SXM 288GB",
     "NVIDIA B200 SXM":             "B200 SXM 192GB",
     "NVIDIA B100 SXM":             "B100 SXM 192GB",
     # H200
@@ -256,6 +279,11 @@ RUNPOD_NAME_MAP = {
     "NVIDIA RTX 5080":             "RTX 5080",
     "NVIDIA GeForce RTX 5070 Ti":  "RTX 5070 Ti",
     "NVIDIA GeForce RTX 5070":     "RTX 5070",
+    "NVIDIA GeForce RTX 5060 Ti":  "RTX 5060 Ti",
+    "NVIDIA RTX 5060 Ti":          "RTX 5060 Ti",
+    # Pro Blackwell
+    "NVIDIA RTX Pro 6000 Blackwell": "RTX Pro 6000 Blackwell",
+    "RTX Pro 6000 Blackwell":        "RTX Pro 6000 Blackwell",
     # Consumer Ada
     "NVIDIA GeForce RTX 4090":     "RTX 4090",
     "NVIDIA RTX 4090":             "RTX 4090",
@@ -270,6 +298,7 @@ RUNPOD_NAME_MAP = {
 
 VASTAI_NAME_MAP = {
     # Blackwell datacenter
+    "B300_SXM_288GB":   "B300 SXM 288GB",
     "B200_SXM_192GB":   "B200 SXM 192GB",
     "B100_SXM_192GB":   "B100 SXM 192GB",
     # Hopper
@@ -300,6 +329,8 @@ VASTAI_NAME_MAP = {
     "RTX_5080":         "RTX 5080",
     "RTX_5070_TI":      "RTX 5070 Ti",
     "RTX_5070":         "RTX 5070",
+    "RTX_5060_TI":      "RTX 5060 Ti",
+    "RTX_PRO_6000_BLACKWELL": "RTX Pro 6000 Blackwell",
     # Consumer Ada
     "RTX_4090":         "RTX 4090",
     "RTX_4080_SUPER":   "RTX 4080 Super",

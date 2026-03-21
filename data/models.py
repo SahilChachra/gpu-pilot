@@ -211,6 +211,93 @@ MODELS = {
         "context": 16384,  "use_cases": ["chat", "code", "reasoning", "math"], "license": "mit",
         "notes": "Phi-4 punches above 14B class on STEM. 16K context. MIT license.",
     },
+
+    # ── Vision-Language Models (VLMs) ─────────────────────────────────────────
+    # Extra fields for VLMs:
+    # is_vlm               = True
+    # vision_encoder       = name/type of vision encoder
+    # vision_encoder_gb    = VRAM for vision encoder weights (GB, fp16)
+    # patch_size           = ViT patch size in pixels
+    # img_size             = default training image size (None = dynamic)
+    # img_tokens_per_image = tokens per image at default res (None = dynamic/tile-based)
+    # tile_based           = True if multi-tile tiling is used (LLaVA-NeXT style)
+    # max_tiles            = max content tiles (only if tile_based)
+    # dynamic_res          = True if model accepts arbitrary resolution
+    # img_token_merge      = merge factor (stride = patch_size × merge); Qwen2-VL uses 2
+    # cross_attention_vision = True if image tokens bypass main KV cache (LLaMA-3.2 style)
+
+    "llava-hf/llava-1.5-7b-hf": {
+        "params_b": 7.1, "active_params_b": 7.1, "family": "llava", "arch": "decoder",
+        "layers": 32, "heads": 32, "kv_heads": 32, "head_dim": 128, "hidden": 4096,
+        "context": 4096, "use_cases": ["vision", "chat"], "license": "llama2",
+        "is_vlm": True, "vision_encoder": "CLIP ViT-L/14@336", "vision_encoder_gb": 0.6,
+        "patch_size": 14, "img_size": 336, "img_tokens_per_image": 576,
+        "tile_based": False, "dynamic_res": False,
+        "notes": "Classic LLaVA-1.5 on Vicuna-7B. CLIP ViT-L/14@336 → 576 tokens/image (fixed). 4K context.",
+    },
+    "llava-hf/llava-1.5-13b-hf": {
+        "params_b": 13.4, "active_params_b": 13.4, "family": "llava", "arch": "decoder",
+        "layers": 40, "heads": 40, "kv_heads": 40, "head_dim": 128, "hidden": 5120,
+        "context": 4096, "use_cases": ["vision", "chat"], "license": "llama2",
+        "is_vlm": True, "vision_encoder": "CLIP ViT-L/14@336", "vision_encoder_gb": 0.6,
+        "patch_size": 14, "img_size": 336, "img_tokens_per_image": 576,
+        "tile_based": False, "dynamic_res": False,
+        "notes": "LLaVA-1.5 on Vicuna-13B. Better OCR/reasoning than 7B at 2× VRAM. 576 tokens/image.",
+    },
+    "llava-hf/llava-v1.6-mistral-7b-hf": {
+        "params_b": 7.3, "active_params_b": 7.3, "family": "llava", "arch": "decoder",
+        "layers": 32, "heads": 32, "kv_heads": 8,  "head_dim": 128, "hidden": 4096,
+        "context": 32768, "use_cases": ["vision", "chat"], "license": "apache2",
+        "is_vlm": True, "vision_encoder": "CLIP ViT-L/14@336", "vision_encoder_gb": 0.6,
+        "patch_size": 14, "img_size": 336, "img_tokens_per_image": 576,
+        "tile_based": True, "max_tiles": 4, "dynamic_res": False,
+        "notes": "LLaVA-NeXT on Mistral-7B. Tile-based: up to (4+1)×576=2880 tokens/image. 32K context.",
+    },
+    "Qwen/Qwen2-VL-7B-Instruct": {
+        "params_b": 8.3, "active_params_b": 8.3, "family": "qwen2vl", "arch": "decoder",
+        "layers": 28, "heads": 28, "kv_heads": 4,  "head_dim": 128, "hidden": 3584,
+        "context": 131072, "use_cases": ["vision", "chat", "multilingual"], "license": "apache2",
+        "is_vlm": True, "vision_encoder": "Qwen2-VL ViT (675M)", "vision_encoder_gb": 1.4,
+        "patch_size": 14, "img_size": None, "img_tokens_per_image": None,
+        "tile_based": False, "dynamic_res": True, "img_token_merge": 2,
+        "notes": "Qwen2-VL dynamic res. Tokens=⌈H/28⌉×⌈W/28⌉. 128K context. Top open VLM for OCR/doc tasks.",
+    },
+    "Qwen/Qwen2-VL-72B-Instruct": {
+        "params_b": 73.4, "active_params_b": 73.4, "family": "qwen2vl", "arch": "decoder",
+        "layers": 80, "heads": 64, "kv_heads": 8,  "head_dim": 128, "hidden": 8192,
+        "context": 131072, "use_cases": ["vision", "chat", "reasoning", "multilingual"], "license": "apache2",
+        "is_vlm": True, "vision_encoder": "Qwen2-VL ViT (675M)", "vision_encoder_gb": 1.4,
+        "patch_size": 14, "img_size": None, "img_tokens_per_image": None,
+        "tile_based": False, "dynamic_res": True, "img_token_merge": 2,
+        "notes": "Frontier open VLM. Same vision encoder as 7B. Exceptional document/chart understanding. Needs 2×80GB at fp16.",
+    },
+    "meta-llama/Llama-3.2-11B-Vision-Instruct": {
+        "params_b": 11,  "active_params_b": 11,  "family": "llama3", "arch": "decoder",
+        "layers": 32, "heads": 32, "kv_heads": 8,  "head_dim": 128, "hidden": 4096,
+        "context": 131072, "use_cases": ["vision", "chat"], "license": "llama3",
+        "is_vlm": True, "vision_encoder": "CLIP ViT-H/14 (851M)", "vision_encoder_gb": 1.7,
+        "patch_size": 14, "img_size": 560, "img_tokens_per_image": 1601,
+        "tile_based": False, "dynamic_res": False, "cross_attention_vision": True,
+        "notes": "LLaMA 3.2 Vision cross-attention: 1601 tokens/image bypass main KV cache. 128K context.",
+    },
+    "meta-llama/Llama-3.2-90B-Vision-Instruct": {
+        "params_b": 90,  "active_params_b": 90,  "family": "llama3", "arch": "decoder",
+        "layers": 80, "heads": 64, "kv_heads": 8,  "head_dim": 128, "hidden": 8192,
+        "context": 131072, "use_cases": ["vision", "chat", "reasoning"], "license": "llama3",
+        "is_vlm": True, "vision_encoder": "CLIP ViT-H/14 (851M)", "vision_encoder_gb": 1.7,
+        "patch_size": 14, "img_size": 560, "img_tokens_per_image": 1601,
+        "tile_based": False, "dynamic_res": False, "cross_attention_vision": True,
+        "notes": "Best open VLM at 90B. Cross-attention vision, 1601 tokens/image. Needs 2×80GB at fp16.",
+    },
+    "mistralai/Pixtral-12B-2409": {
+        "params_b": 12,  "active_params_b": 12,  "family": "mistral", "arch": "decoder",
+        "layers": 40, "heads": 32, "kv_heads": 8,  "head_dim": 128, "hidden": 5120,
+        "context": 131072, "use_cases": ["vision", "chat", "code"], "license": "apache2",
+        "is_vlm": True, "vision_encoder": "PixtralVit / SigLIP-400M", "vision_encoder_gb": 0.8,
+        "patch_size": 16, "img_size": None, "img_tokens_per_image": None,
+        "tile_based": False, "dynamic_res": True, "img_token_merge": 1,
+        "notes": "Native dynamic resolution. 16px patches: ~4096 tokens at 1024×1024. Apache 2.0. No tiling needed.",
+    },
 }
 
 # ── Quantization tables ────────────────────────────────────────────────────────

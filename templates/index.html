@@ -125,6 +125,44 @@
           </div>
         </div>
 
+        <!-- Vision Settings — shown only when a VLM model is selected -->
+        <div id="gf-vision-row" class="vision-settings hidden">
+          <div class="vision-settings-title">
+            <span>👁️ Vision Settings</span>
+            <span id="gf-vision-encoder-info" class="vision-encoder-info"></span>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Images per Request</label>
+              <input type="number" id="gf-num-images" class="text-input" value="1" min="1" max="32">
+            </div>
+            <div class="form-group">
+              <label>Resolution</label>
+              <select id="gf-res-preset" class="select-input">
+                <option value="336x336">336×336 (LLaVA default)</option>
+                <option value="448x448">448×448</option>
+                <option value="640x480">640×480 (VGA)</option>
+                <option value="720x720">720×720</option>
+                <option value="1024x1024">1024×1024</option>
+                <option value="1280x720">1280×720 (HD 720p)</option>
+                <option value="1920x1080">1920×1080 (Full HD)</option>
+                <option value="custom">Custom size…</option>
+              </select>
+            </div>
+          </div>
+          <div id="gf-custom-res-row" class="form-row hidden">
+            <div class="form-group">
+              <label>Width (px)</label>
+              <input type="number" id="gf-img-w" class="text-input" value="1024" min="16" step="16">
+            </div>
+            <div class="form-group">
+              <label>Height (px)</label>
+              <input type="number" id="gf-img-h" class="text-input" value="1024" min="16" step="16">
+            </div>
+          </div>
+          <div id="gf-img-token-preview" class="img-token-preview"></div>
+        </div>
+
         <button class="btn-primary" id="gf-submit">
           <span>Find Best GPUs</span> <span class="btn-arrow">→</span>
         </button>
@@ -212,6 +250,44 @@
             <option value="32768">32K</option>
             <option value="131072">128K</option>
           </select>
+        </div>
+
+        <!-- Vision Settings — shown only when a VLM model is selected -->
+        <div id="cg-vision-row" class="vision-settings hidden">
+          <div class="vision-settings-title">
+            <span>👁️ Vision Settings</span>
+            <span id="cg-vision-encoder-info" class="vision-encoder-info"></span>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Images per Request</label>
+              <input type="number" id="cg-num-images" class="text-input" value="1" min="1" max="32">
+            </div>
+            <div class="form-group">
+              <label>Resolution</label>
+              <select id="cg-res-preset" class="select-input">
+                <option value="336x336">336×336</option>
+                <option value="448x448">448×448</option>
+                <option value="640x480">640×480 (VGA)</option>
+                <option value="720x720">720×720</option>
+                <option value="1024x1024">1024×1024</option>
+                <option value="1280x720">1280×720 (720p)</option>
+                <option value="1920x1080">1920×1080 (Full HD)</option>
+                <option value="custom">Custom size…</option>
+              </select>
+            </div>
+          </div>
+          <div id="cg-custom-res-row" class="form-row hidden">
+            <div class="form-group">
+              <label>Width (px)</label>
+              <input type="number" id="cg-img-w" class="text-input" value="1024" min="16" step="16">
+            </div>
+            <div class="form-group">
+              <label>Height (px)</label>
+              <input type="number" id="cg-img-h" class="text-input" value="1024" min="16" step="16">
+            </div>
+          </div>
+          <div id="cg-img-token-preview" class="img-token-preview"></div>
         </div>
 
         <div class="form-group">
@@ -315,6 +391,40 @@
           </div>
         </div>
 
+        <!-- VLM Vision Settings -->
+        <div class="form-group" style="margin-top:4px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px">
+            <input type="checkbox" id="calc-is-vlm" style="width:14px;height:14px;accent-color:var(--purple)">
+            Vision-Language Model (VLM)
+          </label>
+        </div>
+        <div id="calc-vision-row" class="vision-settings hidden">
+          <div class="vision-settings-title">
+            <span>👁️ VLM Vision Settings</span>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Vision Encoder VRAM (GB)</label>
+              <input type="number" id="calc-vision-encoder-gb" class="text-input" value="0.6" step="0.1" min="0">
+            </div>
+            <div class="form-group">
+              <label>Images per Batch</label>
+              <input type="number" id="calc-num-images" class="text-input" value="1" min="1" max="32">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Image Width (px)</label>
+              <input type="number" id="calc-img-w" class="text-input" value="1024" min="16" step="16">
+            </div>
+            <div class="form-group">
+              <label>Image Height (px)</label>
+              <input type="number" id="calc-img-h" class="text-input" value="1024" min="16" step="16">
+            </div>
+          </div>
+          <div id="calc-img-token-preview" class="img-token-preview"></div>
+        </div>
+
         <button class="btn-primary" id="calc-submit">
           <span>Calculate</span> <span class="btn-arrow">→</span>
         </button>
@@ -366,6 +476,9 @@
           <button class="qp-btn" data-prompt="How does speculative decoding work in vLLM and when should I use it? Give me the best config for a latency-sensitive chat API.">Speculative decoding guide</button>
           <button class="qp-btn" data-prompt="What's the difference between tensor parallelism and pipeline parallelism in vLLM? When should I use each?">TP vs PP parallelism</button>
           <button class="qp-btn" data-prompt="How do I calculate the cost per 1M tokens for different GPU configurations on RunPod? Give me a comparison for Llama 3.1 8B.">Cost per 1M tokens calc</button>
+          <button class="qp-btn" data-prompt="I want to serve Qwen2-VL-7B for batch processing of 4 images per request at 1280×720 resolution. What GPU do I need and what vLLM config should I use?">Qwen2-VL batch images</button>
+          <button class="qp-btn" data-prompt="Explain how image tokens work in VLMs like LLaVA, Qwen2-VL, and LLaMA-3.2-Vision. How do they affect VRAM and throughput?">VLM image token math</button>
+          <button class="qp-btn" data-prompt="What's the difference between LLaVA-1.5, LLaVA-NeXT, Qwen2-VL, and LLaMA-3.2-Vision in terms of token counts and GPU requirements?">VLM model comparison</button>
         </div>
       </div>
 

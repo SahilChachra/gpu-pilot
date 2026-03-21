@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_data.py::TestGpuDatabase::test_rtx_pro_6000_blackwell_present -v)",
+      "Bash(python -m pytest tests/test_data.py -q)",
+      "Bash(python -c \":*)",
+      "Bash(python -m pytest tests/test_pricing.py::TestFetchVastaiPrices::test_query_uses_eq_format_for_rentable tests/test_routes.py::TestMoeCustomVram::test_moe_vram_uses_total_params_not_active -v)",
+      "Bash(python -m pytest tests/test_pricing.py::TestFetchVastaiPrices::test_query_uses_eq_format_for_rentable tests/test_routes.py::TestMoeCustomVram -v)",
+      "Bash(python -m pytest tests/test_routes.py::TestMoeCustomVram -v)",
+      "Bash(python -m pytest --tb=short)"
+    ]
+  }
+}

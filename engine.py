@@ -95,6 +95,50 @@ def cost_per_1m_tokens(hourly_rate, tps: int):
     return round(hourly_rate / tps * 1e6 / 3600, 4)
 
 
+# ── VLM helpers ────────────────────────────────────────────────────────────────
+
+def calc_image_tokens(model_info: dict, img_h: int, img_w: int) -> int:
+    """Number of vision tokens produced by one image at resolution H×W.
+
+    Three strategies depending on model architecture:
+    - dynamic_res  : tokens = ⌈H / stride⌉ × ⌈W / stride⌉   (Qwen2-VL, Pixtral)
+    - tile_based   : tiles selected to cover image + 1 thumbnail (LLaVA-NeXT)
+    - fixed        : img_tokens_per_image regardless of resolution  (LLaVA-1.5)
+    """
+    if model_info.get("dynamic_res"):
+        patch_size = model_info.get("patch_size", 14)
+        merge = model_info.get("img_token_merge", 1)
+        stride = patch_size * merge
+        return math.ceil(img_h / stride) * math.ceil(img_w / stride)
+    elif model_info.get("tile_based"):
+        patch_size = model_info.get("patch_size", 14)
+        img_size   = model_info.get("img_size", 336)
+        tokens_per_tile = (img_size // patch_size) ** 2
+        max_tiles   = model_info.get("max_tiles", 4)
+        tiles_h     = max(1, math.ceil(img_h / img_size))
+        tiles_w     = max(1, math.ceil(img_w / img_size))
+        num_tiles   = min(tiles_h * tiles_w, max_tiles)
+        return (num_tiles + 1) * tokens_per_tile   # +1 thumbnail at base resolution
+    else:
+        return model_info.get("img_tokens_per_image", 576)
+
+
+def calc_vlm_overhead(model_info: dict, num_images: int, img_h: int, img_w: int):
+    """Return (encoder_vram_gb, extra_kv_tokens) for a VLM image batch.
+
+    encoder_vram_gb : fixed cost of loading vision encoder weights
+    extra_kv_tokens : image tokens that enter the *main* KV cache
+                      (0 for cross-attention models like LLaMA-3.2 Vision)
+    """
+    if not model_info.get("is_vlm"):
+        return 0.0, 0
+    encoder_gb = model_info.get("vision_encoder_gb", 0.0)
+    img_tokens = calc_image_tokens(model_info, img_h, img_w)
+    if model_info.get("cross_attention_vision"):
+        return encoder_gb, 0     # image tokens bypass main KV cache
+    return encoder_gb, img_tokens * num_images
+
+
 # ── GPU recommender ────────────────────────────────────────────────────────────
 
 def recommend_gpus(
@@ -105,14 +149,19 @@ def recommend_gpus(
     target_tps: int,
     num_gpus: int = 1,
     model_override: dict = None,
+    num_images: int = 1,
+    img_h: int = 336,
+    img_w: int = 336,
 ) -> list:
     """Return up to 10 ranked GPU recommendations with rich detail."""
     model = model_override or MODELS.get(model_id)
     if not model:
         return []
 
-    model_vram = calc_model_vram_gb(model["params_b"], quant)
-    kv_per_seq = calc_kv_cache_gb_per_seq(model, context_len)
+    encoder_gb, extra_kv = calc_vlm_overhead(model, num_images, img_h, img_w)
+    model_vram = calc_model_vram_gb(model["params_b"], quant) + encoder_gb
+    eff_context = context_len + extra_kv
+    kv_per_seq = calc_kv_cache_gb_per_seq(model, eff_context)
 
     results = []
     for gpu_name, gpu in GPUS.items():
@@ -176,6 +225,9 @@ def recommend_config(
     context_len: int,
     priority: str,
     model_override: dict = None,
+    num_images: int = 1,
+    img_h: int = 336,
+    img_w: int = 336,
 ) -> dict:
     """Given GPU + model, return the best vLLM serve config."""
     if gpu_name not in GPUS:
@@ -185,8 +237,10 @@ def recommend_config(
         return {}
 
     gpu        = GPUS[gpu_name]
-    model_vram = calc_model_vram_gb(model["params_b"], quant)
-    kv_per_seq = calc_kv_cache_gb_per_seq(model, context_len)
+    encoder_gb, extra_kv = calc_vlm_overhead(model, num_images, img_h, img_w)
+    model_vram = calc_model_vram_gb(model["params_b"], quant) + encoder_gb
+    eff_context = context_len + extra_kv
+    kv_per_seq = calc_kv_cache_gb_per_seq(model, eff_context)
     tp_size    = min_gpus_for_model(model_vram, gpu["vram"])
     max_seqs   = calc_max_batch(gpu["vram"] * tp_size, model_vram, kv_per_seq)
 
@@ -221,6 +275,10 @@ def recommend_config(
     else:
         suggested_quant = quant
 
+    is_vlm   = model.get("is_vlm", False)
+    img_tok  = calc_image_tokens(model, img_h, img_w) if is_vlm else 0
+    max_model_len = eff_context if extra_kv > 0 else None
+
     cmd = [f"vllm serve {model_id}"]
     if tp_size > 1:
         cmd.append(f"  --tensor-parallel-size {tp_size}")
@@ -234,6 +292,10 @@ def recommend_config(
         cmd.append("  --kv-cache-dtype fp8_e4m3")
     if cfg_delay > 0:
         cmd.append(f"  --scheduler-delay-factor {cfg_delay}")
+    if is_vlm:
+        cmd.append(f"  --limit-mm-per-prompt image={num_images}")
+    if max_model_len:
+        cmd.append(f"  --max-model-len {max_model_len}")
     cmd.append("  --dtype bfloat16")
 
     est_tps = estimate_throughput(gpu, model, quant, cfg_max_seqs)
@@ -262,6 +324,10 @@ def recommend_config(
             "lambda": cost_per_1m_tokens(gpu["lambda_hr"] * tp_size if gpu["lambda_hr"] else None, est_tps),
             "vastai": cost_per_1m_tokens(gpu["vastai_hr"] * tp_size if gpu["vastai_hr"] else None, est_tps),
         },
-        "model_arch":  model["arch"],
-        "model_notes": model.get("notes", ""),
+        "model_arch":    model["arch"],
+        "model_notes":   model.get("notes", ""),
+        "is_vlm":        is_vlm,
+        "img_tokens_per_image": img_tok if is_vlm else None,
+        "encoder_vram_gb":      round(encoder_gb, 2) if is_vlm else None,
+        "cross_attention_vision": model.get("cross_attention_vision", False),
     }

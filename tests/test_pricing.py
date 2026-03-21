@@ -139,6 +139,19 @@ class TestFetchVastaiPrices:
         assert isinstance(result, tuple)
         assert len(result) == 2
 
+    def test_query_uses_eq_format_for_rentable(self, requests_mock):
+        """Vast.ai API requires rentable:{eq:true} not rentable:true (400 otherwise)."""
+        import json as _json
+        requests_mock.get(self.VASTAI_URL, json={"offers": []})
+        fetch_vastai_prices()
+        assert requests_mock.called
+        qs = requests_mock.last_request.qs
+        q_str = qs.get("q", [""])[0]
+        q = _json.loads(q_str)
+        assert isinstance(q.get("rentable"), dict), (
+            "rentable should be a dict like {eq: true}, not a plain bool"
+        )
+
 
 # ── refresh_prices ─────────────────────────────────────────────────────────────
 
